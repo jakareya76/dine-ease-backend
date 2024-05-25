@@ -23,9 +23,19 @@ const client = new MongoClient(uri, {
 async function run() {
   try {
     const menuCollection = client.db("dine-ease").collection("menu");
+    const usersCollection = client.db("dine-ease").collection("users");
     const reviewsCollection = client.db("dine-ease").collection("reviews");
     const cartsCollection = client.db("dine-ease").collection("carts");
 
+    // users api
+
+    app.post("/users", async (req, res) => {
+      const user = req.body;
+      const result = await usersCollection.insertOne(user);
+      res.send(result);
+    });
+
+    // menu api
     app.get("/menu", async (req, res) => {
       const result = await menuCollection.find().toArray();
       res.send(result);
