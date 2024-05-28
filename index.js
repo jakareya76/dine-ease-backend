@@ -1,6 +1,7 @@
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const express = require("express");
 const cors = require("cors");
+var jwt = require("jsonwebtoken");
 require("dotenv").config();
 
 const app = express();
@@ -20,6 +21,23 @@ const client = new MongoClient(uri, {
   },
 });
 
+const verifyToken = (req, res, next) => {
+  if (!req.headers.authorization) {
+    return res.status(401).send({ message: "unauthorized access" });
+  }
+
+  const token = req.headers.authorization.split(" ")[1];
+
+  jwt.verify(token, process.env.ACCESS_TOKEN, (err, decoded) => {
+    if (err) {
+      return res.status(401).send({ message: "unauthorized access" });
+    }
+
+    req.decoded = decoded;
+    next();
+  });
+};
+
 async function run() {
   try {
     const menuCollection = client.db("dine-ease").collection("menu");
@@ -27,10 +45,40 @@ async function run() {
     const reviewsCollection = client.db("dine-ease").collection("reviews");
     const cartsCollection = client.db("dine-ease").collection("carts");
 
+    // jwt api
+    app.post("/jwt", async (req, res) => {
+      const payload = req.body;
+
+      const token = jwt.sign(payload, process.env.ACCESS_TOKEN, {
+        expiresIn: "10h",
+      });
+
+      res.send({ token });
+    });
+
     // users api
-    app.get("/users", async (req, res) => {
+    app.get("/users", verifyToken, async (req, res) => {
       const result = await usersCollection.find().toArray();
       res.send(result);
+    });
+
+    app.get("/users/admin/:email", verifyToken, async (req, res) => {
+      const email = req.params.email;
+
+      if (email !== req.decoded.email) {
+        return res.status(403).send({ message: "forbidden access" });
+      }
+
+      const query = { email: email };
+      const user = await usersCollection.findOne(query);
+
+      let admin = false;
+
+      if (user) {
+        admin = user?.role === "admin";
+      }
+
+      res.send({ admin });
     });
 
     app.post("/users", async (req, res) => {
