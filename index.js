@@ -28,6 +28,7 @@ async function run() {
     const usersCollection = client.db("dine-ease").collection("users");
     const reviewsCollection = client.db("dine-ease").collection("reviews");
     const cartsCollection = client.db("dine-ease").collection("carts");
+    const paymentsCollection = client.db("dine-ease").collection("payments");
 
     const verifyToken = (req, res, next) => {
       if (!req.headers.authorization) {
@@ -222,18 +223,64 @@ async function run() {
 
     // payment api
     app.post("/create-payment-intent", async (req, res) => {
-      const { price } = req.body;
-      const amount = parseInt(price * 100);
+      try {
+        const { price } = req.body;
 
-      const paymentIntent = await stripe.paymentIntents.create({
-        amount: amount,
-        currency: "usd",
-        payment_method_types: ["card"],
-      });
+        // Validate price
+        if (!price || isNaN(price)) {
+          return res.status(400).send({ error: "Invalid price" });
+        }
 
-      res.send({
-        clientSecret: paymentIntent.client_secret,
-      });
+        // Convert price to cents
+        const amount = parseInt(price * 100);
+
+        // Check if amount is a valid integer
+        if (isNaN(amount) || amount <= 0) {
+          return res.status(400).send({ error: "Invalid amount" });
+        }
+
+        // Create the payment intent
+        const paymentIntent = await stripe.paymentIntents.create({
+          amount: amount,
+          currency: "usd",
+          payment_method_types: ["card"],
+        });
+
+        res.send({
+          clientSecret: paymentIntent.client_secret,
+        });
+      } catch (error) {
+        console.error("Error creating payment intent:", error);
+        res.status(500).send({ error: "Internal Server Error" });
+      }
+    });
+
+    app.get("/payments/:email", verifyToken, async (req, res) => {
+      const email = req.params.email;
+
+      const query = { email: email };
+
+      if (req.params.email !== req.decoded.email) {
+        return res.status(403).send("forbidden access");
+      }
+
+      const result = await paymentsCollection.find(query).toArray();
+      res.send(result);
+    });
+
+    app.post("/payments", async (req, res) => {
+      const payment = req.body;
+      const paymentResult = await paymentsCollection.insertOne(payment);
+
+      const query = {
+        _id: {
+          $in: payment.cartIds.map((id) => new ObjectId(id)),
+        },
+      };
+
+      const deleteResult = await cartsCollection.deleteMany(query);
+
+      res.send({ paymentResult, deleteResult });
     });
 
     // Send a ping to confirm a successful connection
