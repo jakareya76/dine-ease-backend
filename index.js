@@ -284,15 +284,12 @@ async function run() {
     });
 
     // stats api
-
-    // verifyToken, verifyAdmin,
-
-    app.get("/admin-stats", async (req, res) => {
-      const user = await usersCollection.estimatedDocumentCount();
+    app.get("/admin-stats", verifyToken, verifyAdmin, async (req, res) => {
+      const users = await usersCollection.estimatedDocumentCount();
       const menuItems = await menuCollection.estimatedDocumentCount();
       const orders = await paymentsCollection.estimatedDocumentCount();
 
-      const revenue = await paymentsCollection
+      const result = await paymentsCollection
         .aggregate([
           {
             $group: {
@@ -303,16 +300,55 @@ async function run() {
         ])
         .toArray();
 
-      const totalRevenue = revenue.length > 0 ? revenue[0].totalRevenue : 0;
+      const revenue = result.length > 0 ? result[0].totalRevenue : 0;
 
-      res.send({ user, menuItems, orders, totalRevenue });
+      res.send({ users, menuItems, orders, revenue });
+    });
+
+    // using aggregate pipeline
+    app.get("/order-stats", verifyToken, verifyAdmin, async (req, res) => {
+      const result = await paymentsCollection
+        .aggregate([
+          {
+            $unwind: "$menuItemIds",
+          },
+          {
+            $lookup: {
+              from: "menu",
+              localField: "menuItemIds",
+              foreignField: "_id",
+              as: "menuItems",
+            },
+          },
+          {
+            $unwind: "$menuItems",
+          },
+          {
+            $group: {
+              _id: "$menuItems.category",
+              quantity: { $sum: 1 },
+              revenue: { $sum: "$menuItems.price" },
+            },
+          },
+          {
+            $project: {
+              _id: 0,
+              category: "$_id",
+              quantity: "$quantity",
+              revenue: "$revenue",
+            },
+          },
+        ])
+        .toArray();
+
+      res.send(result);
     });
 
     // Send a ping to confirm a successful connection
-    await client.db("admin").command({ ping: 1 });
-    console.log(
-      "Pinged your deployment. You successfully connected to MongoDB!"
-    );
+    // await client.db("admin").command({ ping: 1 });
+    // console.log(
+    //   "Pinged your deployment. You successfully connected to MongoDB!"
+    // );
   } finally {
     // Ensures that the client will close when you finish/error
     // await client.close();
